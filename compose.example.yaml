@@ -1,0 +1,14 @@
+services:
+  keyboxstore:
+    build: .
+    restart: unless-stopped
+    environment:
+      NTFY_URL: ${NTFY_URL:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - keybox-data:/data
+
+volumes:
+  keybox-data:

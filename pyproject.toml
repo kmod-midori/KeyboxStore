@@ -1,0 +1,30 @@
+[project]
+name = "keyboxstore"
+version = "0.1.0"
+description = "Single-file Android keybox storage, certificate metadata, and export API"
+readme = "README.md"
+authors = [
+    { name = "Midori Kochiya", email = "i@reimu.moe" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "cryptography>=50.0.2",
+    "defusedxml>=0.7.1",
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
+    "python-multipart>=0.0.32",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+keyboxstore = "keyboxstore:main"
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
