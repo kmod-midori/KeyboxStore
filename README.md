@@ -29,6 +29,8 @@ Compose stores XML in a persistent named volume.
 | --- | --- | --- |
 | POST | `/keyboxes` | Upload XML as multipart field `file` |
 | GET | `/keyboxes` | List keyboxes and leaf certificate metadata |
+| GET | `/keyboxes/is-expiring` | Check all certificates for impending expiry |
+| GET | `/keyboxes/export?start=0&end=1` | Export selected keyboxes in one XML file |
 | GET | `/keyboxes/{index}` | Get one keybox's metadata |
 | GET | `/keyboxes/{index}/export` | Download one keybox with its private keys and full chains |
 
@@ -41,6 +43,18 @@ curl -o keybox-0.xml http://127.0.0.1:8000/keyboxes/0/export
 Indexes start at zero and refer to the current file. Uploads are limited to
 10 MiB; a valid upload atomically replaces the previous file. Invalid uploads
 leave it intact.
+
+`is-expiring` returns `is_expiring`, `threshold_days`, and matching `certificates`
+with keybox index, algorithm, certificate index, expiry time, and expired status.
+It checks every certificate in every chain, including already-expired certificates.
+Set `API_EXPIRY_DAYS` to configure the threshold in days (fractions allowed,
+0–36500; default: 2). It uses a strict less-than comparison and is independent of
+`NTFY_EXPIRY_DAYS`. Both settings are read at startup and supported by Compose.
+
+Multi-export requires an inclusive range: `/keyboxes/export?start=0&end=9`
+exports indexes 0 through 9. Both bounds must be nonnegative with `start <= end`.
+Missing or invalid bounds return 422; an out-of-bounds range returns 404.
+The output contains the selected keys and full chains with the correct count.
 
 Metadata describes the first certificate in each RSA or ECDSA chain: subject,
 issuer, serial number, validity dates, SHA-256 fingerprint, signature algorithm,
@@ -67,8 +81,10 @@ best-effort, with a five-second network timeout and no retries; failures are log
 without affecting the saved file.
 
 With ntfy enabled, the service also checks every keybox at startup and every
-24 hours. It sends one notification listing leaf certificates with less than
-two days remaining, including certificates already expired, with their keybox
+24 hours. Set `NTFY_EXPIRY_DAYS` to configure its threshold independently of the
+API (default: 2 days; fractions allowed, 0–36500). It sends one notification listing
+certificates anywhere in the chains with less than that time remaining,
+including certificates already expired, with their keybox
 indexes, algorithms, and UTC expiry times. Warnings repeat daily until the file
 is replaced with valid certificates. Run one application worker to avoid duplicate
 scheduled notifications.

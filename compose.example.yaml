@@ -5,6 +5,8 @@ services:
     environment:
       NTFY_URL: ${NTFY_URL:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
+      NTFY_EXPIRY_DAYS: ${NTFY_EXPIRY_DAYS:-2}
+      API_EXPIRY_DAYS: ${API_EXPIRY_DAYS:-2}
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

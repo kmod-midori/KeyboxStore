@@ -231,3 +231,57 @@ def test_ntfy_disabled(tmp_path, document, monkeypatch):
     monkeypatch.setattr("keyboxstore.app.notify_upload", unexpected)
     with TestClient(create_app(tmp_path / "keybox.xml")) as client:
         assert upload(client, document).status_code == 201
+
+
+def test_is_expiring_threshold_independent_of_ntfy(tmp_path, document, monkeypatch):
+    monkeypatch.setenv("NTFY_EXPIRY_DAYS", "100")
+    with TestClient(create_app(tmp_path / "keybox.xml")) as client:
+        assert client.get("/keyboxes/is-expiring").status_code == 404
+        upload(client, document)
+        assert client.get("/keyboxes/is-expiring").json()["is_expiring"] is False
+    monkeypatch.setenv("API_EXPIRY_DAYS", "31")
+    with TestClient(create_app(tmp_path / "keybox.xml")) as client:
+        result = client.get("/keyboxes/is-expiring").json()
+        assert result["threshold_days"] == 31
+        assert result["is_expiring"] is True
+        assert len(result["certificates"]) == 4
+        assert {cert["keybox_index"] for cert in result["certificates"]} == {0, 1}
+    monkeypatch.setenv("API_EXPIRY_DAYS", "0")
+    with TestClient(create_app(tmp_path / "keybox.xml")) as client:
+        assert client.get("/keyboxes/is-expiring").json()["is_expiring"] is False
+
+
+@pytest.mark.parametrize("variable", ["NTFY_EXPIRY_DAYS", "API_EXPIRY_DAYS"])
+@pytest.mark.parametrize("value", ["-1", "nan", "inf", "bad", "36501"])
+def test_invalid_expiry_threshold(tmp_path, monkeypatch, variable, value):
+    monkeypatch.setenv(variable, value)
+    with pytest.raises(ValueError):
+        create_app(tmp_path / "keybox.xml")
+
+
+def test_range_export(tmp_path, document):
+    with TestClient(create_app(tmp_path / "keybox.xml")) as client:
+        assert client.get("/keyboxes/export?start=0&end=1").status_code == 404
+        upload(client, document)
+        for start, end in ((0, 1), (0, 0), (1, 1)):
+            response = client.get(f"/keyboxes/export?start={start}&end={end}")
+            assert response.status_code == 200
+            root = ET.fromstring(response.content)
+            assert root.findtext("NumberOfKeyboxes") == str(end - start + 1)
+            original_boxes = ET.fromstring(document).findall("Keybox")
+            assert [ET.tostring(box) for box in root.findall("Keybox")] == [
+                ET.tostring(box) for box in original_boxes[start : end + 1]
+            ]
+            assert response.headers["cache-control"] == "no-store"
+        for query in (
+            "start=0",
+            "end=1",
+            "start=1&end=0",
+            "start=-1&end=1",
+            "start=abc&end=1",
+            "indexes=0",
+            "",
+        ):
+            assert client.get(f"/keyboxes/export?{query}").status_code == 422
+        for query in ("start=0&end=2", "start=2&end=2", "start=0&end=999999999999"):
+            assert client.get(f"/keyboxes/export?{query}").status_code == 404

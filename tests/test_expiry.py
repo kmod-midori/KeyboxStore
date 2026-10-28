@@ -23,6 +23,7 @@ def test_expiry_threshold_and_all_keyboxes(tmp_path, monkeypatch):
                 {
                     "algorithm": "ecdsa",
                     "leaf": {"not_valid_after": (now + offset).isoformat()},
+                    "certificate_expirations": [(now + offset).isoformat()],
                 }
             ],
         }
@@ -95,6 +96,36 @@ def test_daily_schedule_and_cancellation(tmp_path, monkeypatch):
         except asyncio.CancelledError:
             pass
         assert task.cancelled()
-        assert calls == [(storage, "url", "token")] * 2
+        assert calls == [(storage, "url", "token", 2)] * 2
 
     asyncio.run(scenario())
+
+
+def test_chain_certificate_and_custom_notification_threshold(tmp_path, monkeypatch):
+    now = datetime(2026, 10, 28, tzinfo=UTC)
+    boxes = [
+        {
+            "index": 0,
+            "keys": [
+                {
+                    "algorithm": "rsa",
+                    "certificate_expirations": [
+                        (now + timedelta(days=30)).isoformat(),
+                        (now + timedelta(days=4)).isoformat(),
+                    ],
+                }
+            ],
+        }
+    ]
+    storage = tmp_path / "keybox.xml"
+    storage.write_bytes(b"test")
+    monkeypatch.setattr(expiry, "parse", lambda data: (None, boxes))
+    send = Mock()
+    monkeypatch.setattr(expiry, "send_notification", send)
+    expiry.check_expiry(storage, "url", "", now=now)
+    send.assert_not_called()
+    expiry.check_expiry(storage, "url", "", 5, now=now)
+    send.assert_called_once()
+    assert "less than 5 days" in send.call_args.args[3]
+    assert "certificate 1" in send.call_args.args[3]
+    assert "certificate 0" not in send.call_args.args[3]

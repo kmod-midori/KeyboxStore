@@ -104,6 +104,9 @@ def parse(data: bytes) -> tuple[ET.Element, list[dict]]:
                     {
                         "algorithm": algorithm,
                         "certificate_count": len(parsed),
+                        "certificate_expirations": [
+                            cert.not_valid_after_utc.isoformat() for cert in parsed
+                        ],
                         "leaf": {
                             "subject": leaf.subject.rfc4514_string(),
                             "issuer": leaf.issuer.rfc4514_string(),
@@ -129,8 +132,9 @@ def parse(data: bytes) -> tuple[ET.Element, list[dict]]:
     return root, metadata
 
 
-def export(root: ET.Element, index: int) -> bytes:
+def export(root: ET.Element, indexes: list[int]) -> bytes:
     result = ET.Element("AndroidAttestation")
-    ET.SubElement(result, "NumberOfKeyboxes").text = "1"
-    result.append(root.findall("Keybox")[index])
+    ET.SubElement(result, "NumberOfKeyboxes").text = str(len(indexes))
+    boxes = root.findall("Keybox")
+    result.extend(boxes[index] for index in indexes)
     return ET.tostring(result, encoding="utf-8", xml_declaration=True)

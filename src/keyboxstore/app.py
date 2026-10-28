@@ -4,19 +4,22 @@ import asyncio
 import os
 import tempfile
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi import Path as APIPath
 from fastapi.responses import Response
+from pydantic import Field, TypeAdapter
 
-from keyboxstore.expiry import monitor_expiry
+from keyboxstore.expiry import expiring_certificates, monitor_expiry
 from keyboxstore.notifications import notify_upload
 from keyboxstore.parser import InvalidKeybox, export, parse
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 Index = Annotated[int, APIPath(ge=0, description="Zero-based keybox index")]
+Threshold = Annotated[float, Field(ge=0, le=36500, allow_inf_nan=False)]
 
 
 def create_app(
@@ -25,13 +28,21 @@ def create_app(
     storage = Path(storage_path or os.environ.get("KEYBOX_FILE", "data/keybox.xml"))
     ntfy_url = os.environ.get("NTFY_URL", "").strip()
     ntfy_token = os.environ.get("NTFY_TOKEN", "").strip()
+    ntfy_threshold = TypeAdapter(Threshold).validate_python(
+        os.environ.get("NTFY_EXPIRY_DAYS", "2")
+    )
+    api_threshold = TypeAdapter(Threshold).validate_python(
+        os.environ.get("API_EXPIRY_DAYS", "2")
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if not ntfy_url:
             yield
             return
-        task = asyncio.create_task(monitor_expiry(storage, ntfy_url, ntfy_token))
+        task = asyncio.create_task(
+            monitor_expiry(storage, ntfy_url, ntfy_token, ntfy_threshold)
+        )
         try:
             yield
         finally:
@@ -99,6 +110,32 @@ def create_app(
         _, metadata = current()
         return {"count": len(metadata), "keyboxes": metadata}
 
+    @app.get("/keyboxes/is-expiring")
+    def is_expiring():
+        _, metadata = current()
+        matches = expiring_certificates(metadata, api_threshold, datetime.now(UTC))
+        return {
+            "is_expiring": bool(matches),
+            "threshold_days": api_threshold,
+            "certificates": matches,
+        }
+
+    @app.get("/keyboxes/export", response_class=Response)
+    def export_keyboxes(
+        start: Annotated[int, Query(ge=0)],
+        end: Annotated[int, Query(ge=0)],
+    ):
+        if start > end:
+            raise HTTPException(422, "start must be less than or equal to end")
+        root, metadata = current()
+        if end >= len(metadata):
+            raise HTTPException(404, "Keybox index not found")
+        return Response(
+            export(root, list(range(start, end + 1))),
+            media_type="application/xml",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/keyboxes/{index}", summary="Get one keybox's leaf certificate metadata")
     def get_keybox(index: Index):
         _, metadata = current(index)
@@ -113,7 +150,7 @@ def create_app(
     def export_keybox(index: Index):
         root, _ = current(index)
         return Response(
-            export(root, index),
+            export(root, [index]),
             media_type="application/xml",
             headers={
                 "Cache-Control": "no-store",
