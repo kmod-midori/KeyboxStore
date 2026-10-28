@@ -1,6 +1,6 @@
 [project]
 name = "keyboxstore"
-version = "0.1.0"
+version = "0.2.0"
 description = "Single-file Android keybox storage, certificate metadata, and export API"
 readme = "README.md"
 authors = [
